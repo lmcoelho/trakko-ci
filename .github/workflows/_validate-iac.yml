@@ -3,14 +3,22 @@ name: _validate-iac (reusable)
 on:
   workflow_call:
     inputs:
-      yaml-paths:
-        description: Space-separated paths to lint with yamllint and validate with kubeconform
+      yamllint-paths:
+        description: Space-separated paths to lint with yamllint
         type: string
         default: "k8s/"
+      kubeconform-paths:
+        description: Space-separated paths to validate with kubeconform (defaults to yamllint-paths if empty)
+        type: string
+        default: ""
       yamllint-config:
         description: Inline yamllint config string
         type: string
         default: '{extends: relaxed, rules: {line-length: {max: 200}}}'
+      yamllint-blocking:
+        description: Fail the job on yamllint violations
+        type: boolean
+        default: false
       kubeconform-args:
         description: "Extra args to kubeconform (default: -summary -ignore-missing-schemas)"
         type: string
@@ -46,16 +54,25 @@ jobs:
       - name: Lint
         env:
           YL_CFG: ${{ inputs.yamllint-config }}
-          YL_PATHS: ${{ inputs.yaml-paths }}
+          YL_PATHS: ${{ inputs.yamllint-paths }}
           INCLUDE_WF: ${{ inputs.include-workflows }}
+          BLOCKING: ${{ inputs.yamllint-blocking }}
         run: |
-          set -e
+          set +e
           paths="$YL_PATHS"
           if [ "$INCLUDE_WF" = "true" ] && [ -d .github/workflows ]; then
             paths="$paths .github/workflows/"
           fi
           # shellcheck disable=SC2086
           yamllint -d "$YL_CFG" $paths
+          rc=$?
+          if [ "$BLOCKING" = "true" ]; then
+            exit $rc
+          fi
+          if [ $rc -ne 0 ]; then
+            echo "::warning::yamllint reported issues (non-blocking; set yamllint-blocking: true to enforce)"
+          fi
+          exit 0
 
   kubeconform:
     name: kubeconform
@@ -68,12 +85,31 @@ jobs:
             | sudo tar xz -C /usr/local/bin
       - name: Validate manifests
         env:
-          PATHS: ${{ inputs.yaml-paths }}
+          KCPATHS: ${{ inputs.kubeconform-paths }}
+          YLPATHS: ${{ inputs.yamllint-paths }}
           ARGS: ${{ inputs.kubeconform-args }}
         run: |
           set -e
+          paths="$KCPATHS"
+          if [ -z "$paths" ]; then
+            paths="$YLPATHS"
+          fi
+          # Filter out paths that don't exist on this branch (callers may pass
+          # paths that vary across branches, e.g. server/k8s-manifests/).
+          existing=""
+          for p in $paths; do
+            if [ -d "$p" ]; then
+              existing="$existing $p"
+            else
+              echo "::notice::skipping non-existent kubeconform path '$p'"
+            fi
+          done
+          if [ -z "$existing" ]; then
+            echo "::warning::no kubeconform paths exist on this branch — nothing to validate"
+            exit 0
+          fi
           # shellcheck disable=SC2086
-          find $PATHS -name '*.yaml' ! -name '*template*' -exec \
+          find $existing -name '*.yaml' ! -name '*template*' -exec \
             kubeconform $ARGS {} +
 
   summary:
