@@ -73,7 +73,6 @@ jobs:
           COV_PATHS: ${{ inputs.coverage-paths }}
           COV_GATE: ${{ inputs.coverage-fail-under }}
         run: |
-          set -e
           cov_args=""
           if [ -n "$COV_PATHS" ]; then
             for p in $COV_PATHS; do cov_args="$cov_args --cov=$p"; done
@@ -84,6 +83,12 @@ jobs:
           fi
           # shellcheck disable=SC2086
           ${{ inputs.test-command }} $cov_args
+          rc=$?
+          if [ "$rc" -eq 124 ]; then
+            echo "::error::test command timed out (exit 124)"
+          fi
+          echo "::notice::pytest exit code: $rc"
+          exit $rc
 
       - uses: lmcoelho/trakko-ci/actions/step-summary@v1
         with:
