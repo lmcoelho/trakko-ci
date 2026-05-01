@@ -32,8 +32,8 @@ is still ai-hosting in case of a rapid rollback.
 ```bash
 # Revert v1 to its previous SHA. All callers using @v1 get the
 # rollback on their next CI run.
-git -C lmcoelho/.github tag -f v1 <previous-sha>
-git -C lmcoelho/.github push --force-with-lease origin v1
+git -C lmcoelho/trakko-ci tag -f v1 <previous-sha>
+git -C lmcoelho/trakko-ci push --force-with-lease origin v1
 ```
 
 Force-push to a major-version tag is the documented exception to the

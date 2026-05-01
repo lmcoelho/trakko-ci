@@ -71,7 +71,7 @@ jobs:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
 
       - name: Tailscale + SSH bootstrap
-        uses: lmcoelho/.github/actions/tailscale-ssh-bootstrap@v1
+        uses: lmcoelho/trakko-ci/actions/tailscale-ssh-bootstrap@v1
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
@@ -189,7 +189,7 @@ jobs:
             $SSH "sudo kubectl -n '$NS' rollout status deployment/'$depl' --timeout=${ROLLOUT_TIMEOUT}"
           done
 
-      - uses: lmcoelho/.github/actions/step-summary@v1
+      - uses: lmcoelho/trakko-ci/actions/step-summary@v1
         if: always()
         with:
           job-name: deploy-vps

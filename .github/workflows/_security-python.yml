@@ -52,7 +52,7 @@ jobs:
       pull-requests: read
       issues: read
     steps:
-      - uses: lmcoelho/.github/actions/gitleaks-scan@v1
+      - uses: lmcoelho/trakko-ci/actions/gitleaks-scan@v1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -112,6 +112,6 @@ jobs:
           if-no-files-found: ignore
           retention-days: 90
 
-      - uses: lmcoelho/.github/actions/step-summary@v1
+      - uses: lmcoelho/trakko-ci/actions/step-summary@v1
         with:
           job-name: security-python

@@ -111,6 +111,6 @@ jobs:
       - name: Run integration tests
         run: ${{ inputs.test-command }}
 
-      - uses: lmcoelho/.github/actions/step-summary@v1
+      - uses: lmcoelho/trakko-ci/actions/step-summary@v1
         with:
           job-name: test-integration

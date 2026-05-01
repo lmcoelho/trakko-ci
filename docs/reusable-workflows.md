@@ -16,7 +16,7 @@ Authoritative source: the YAML files under `.github/workflows/_*.yml`.
 ```yaml
 jobs:
   validate:
-    uses: lmcoelho/.github/.github/workflows/_validate-iac.yml@v1
+    uses: lmcoelho/trakko-ci/.github/workflows/_validate-iac.yml@v1
     with:
       yaml-paths: "k8s/ open-brain/k8s/ server/k8s-manifests/per-namespace/"
 ```
@@ -34,7 +34,7 @@ jobs:
 ```yaml
 jobs:
   test:
-    uses: lmcoelho/.github/.github/workflows/_test-python.yml@v1
+    uses: lmcoelho/trakko-ci/.github/workflows/_test-python.yml@v1
     with:
       python-version: "3.13"
       coverage-paths: "src config"
@@ -55,7 +55,7 @@ jobs:
 ```yaml
 jobs:
   test:
-    uses: lmcoelho/.github/.github/workflows/_test-node.yml@v1
+    uses: lmcoelho/trakko-ci/.github/workflows/_test-node.yml@v1
     with:
       node-version: "20"
       build-command: "npm run build --workspace=packages/pipeline-engine"
@@ -88,7 +88,7 @@ Sets `DATABASE_URL` and `REDIS_URL` env vars by default.
 ```yaml
 jobs:
   security:
-    uses: lmcoelho/.github/.github/workflows/_security-python.yml@v1
+    uses: lmcoelho/trakko-ci/.github/workflows/_security-python.yml@v1
     with:
       python-version: "3.12"
       bandit-paths: "core brain services config"
@@ -118,7 +118,7 @@ jobs:
 jobs:
   scan:
     needs: build
-    uses: lmcoelho/.github/.github/workflows/_security-image.yml@v1
+    uses: lmcoelho/trakko-ci/.github/workflows/_security-image.yml@v1
     with:
       image: ghcr.io/lmcoelho/money-maker:${{ needs.build.outputs.image-tag }}
       grype-severity-cutoff: "high"
@@ -139,7 +139,7 @@ without tag).
 ```yaml
 jobs:
   build-api:
-    uses: lmcoelho/.github/.github/workflows/_build-image.yml@v1
+    uses: lmcoelho/trakko-ci/.github/workflows/_build-image.yml@v1
     with:
       image-name: vigilos-api
       dockerfile: docker/Dockerfile.api
@@ -168,7 +168,7 @@ To consume the outputs in a sibling job:
 jobs:
   deploy:
     needs: [build-router, build-infomaniak]
-    uses: lmcoelho/.github/.github/workflows/_deploy-vps.yml@v1
+    uses: lmcoelho/trakko-ci/.github/workflows/_deploy-vps.yml@v1
     with:
       environment: production
       namespace: atlas
@@ -197,7 +197,7 @@ non-image-bearing apply step. Image refs flow through `set image` /
 ### `actions/tailscale-ssh-bootstrap`
 
 ```yaml
-- uses: lmcoelho/.github/actions/tailscale-ssh-bootstrap@v1
+- uses: lmcoelho/trakko-ci/actions/tailscale-ssh-bootstrap@v1
   with:
     oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
     oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
@@ -208,7 +208,7 @@ non-image-bearing apply step. Image refs flow through `set image` /
 ### `actions/gitleaks-scan`
 
 ```yaml
-- uses: lmcoelho/.github/actions/gitleaks-scan@v1
+- uses: lmcoelho/trakko-ci/actions/gitleaks-scan@v1
   with:
     github-token: ${{ secrets.GITHUB_TOKEN }}
     enable-comments: "true"
@@ -217,7 +217,7 @@ non-image-bearing apply step. Image refs flow through `set image` /
 ### `actions/step-summary`
 
 ```yaml
-- uses: lmcoelho/.github/actions/step-summary@v1
+- uses: lmcoelho/trakko-ci/actions/step-summary@v1
   with:
     job-name: my-job
     details: "- Anything: relevant"

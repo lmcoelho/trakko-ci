@@ -1,11 +1,11 @@
-# lmcoelho/.github — Trakko Pipeline v2
+# lmcoelho/trakko-ci — Trakko Pipeline v2
 
 Central library of reusable GitHub Actions workflows + composite actions
 shared across every `lmcoelho/*` (trakko) repository.
 
 ## Quick reference
 
-Reusable workflows (call with `uses: lmcoelho/.github/.github/workflows/_<name>.yml@v1`):
+Reusable workflows (call with `uses: lmcoelho/trakko-ci/.github/workflows/_<name>.yml@v1`):
 
 | Name | Purpose |
 |---|---|
@@ -19,7 +19,7 @@ Reusable workflows (call with `uses: lmcoelho/.github/.github/workflows/_<name>.
 | `_build-image.yml` | buildx + GHCR + metadata-action + GHA layer cache, returns sha-tag |
 | `_deploy-vps.yml` | Tailscale + SSH + apply manifests + set image + verify + rollback |
 
-Composite actions (call with `uses: lmcoelho/.github/actions/<name>@v1`):
+Composite actions (call with `uses: lmcoelho/trakko-ci/actions/<name>@v1`):
 
 | Name | Purpose |
 |---|---|

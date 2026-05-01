@@ -1,7 +1,7 @@
 name: smoke-test
 
 # Self-test: exercise every reusable workflow + composite action against
-# synthetic inputs. Must be green for any PR to lmcoelho/.github to merge.
+# synthetic inputs. Must be green for any PR to lmcoelho/trakko-ci to merge.
 # Note: _deploy-vps.yml cannot be smoke-tested without a real VPS; it is
 # covered by the canary repo (ai-hosting) being the first caller.
 
