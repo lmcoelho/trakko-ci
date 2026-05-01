@@ -1,0 +1,104 @@
+name: smoke-test
+
+# Self-test: exercise every reusable workflow + composite action against
+# synthetic inputs. Must be green for any PR to lmcoelho/.github to merge.
+# Note: _deploy-vps.yml cannot be smoke-tested without a real VPS; it is
+# covered by the canary repo (ai-hosting) being the first caller.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  prepare-fixture:
+    name: prepare synthetic fixture
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      - name: Generate fixture
+        run: |
+          mkdir -p _smoke/fixture/k8s
+          mkdir -p _smoke/fixture/python_app/tests
+          mkdir -p _smoke/fixture/node_app
+          # k8s manifest
+          cat > _smoke/fixture/k8s/ns.yaml <<'EOF'
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: smoke-fixture
+          EOF
+          # python app
+          cat > _smoke/fixture/python_app/requirements.txt <<'EOF'
+          requests==2.32.5
+          EOF
+          mkdir -p _smoke/fixture/python_app/src
+          cat > _smoke/fixture/python_app/src/__init__.py <<'EOF'
+          def add(a, b):
+              return a + b
+          EOF
+          cat > _smoke/fixture/python_app/tests/test_add.py <<'EOF'
+          from src import add
+          def test_add():
+              assert add(2, 2) == 4
+          EOF
+          # node app
+          cat > _smoke/fixture/node_app/package.json <<'EOF'
+          {
+            "name": "smoke-fixture",
+            "version": "0.0.0",
+            "private": true,
+            "scripts": { "test": "node -e \"if (1+1!==2){process.exit(1)}\"" }
+          }
+          EOF
+          ls -la _smoke/fixture
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+        with:
+          name: smoke-fixture
+          path: _smoke/fixture
+          retention-days: 1
+
+  validate-iac-smoke:
+    needs: prepare-fixture
+    name: smoke _validate-iac
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      # Lint a known-good fixture and the workflow files of this repo
+      - name: yamllint workflow files
+        run: |
+          pip install --quiet yamllint
+          yamllint -d '{extends: relaxed, rules: {line-length: {max: 200}}}' .github/workflows/
+
+  step-summary-smoke:
+    name: smoke step-summary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      - uses: ./actions/step-summary
+        with:
+          job-name: smoke-step-summary
+          details: |
+            - This is a smoke-test exercising the step-summary composite.
+
+  gitleaks-smoke:
+    name: smoke gitleaks-scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - uses: ./actions/gitleaks-scan
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          enable-comments: "false"

@@ -1,0 +1,116 @@
+name: _test-integration (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      runtime:
+        description: 'python | node'
+        type: string
+        required: true
+      runtime-version:
+        type: string
+        required: true
+      working-directory:
+        type: string
+        default: "."
+      install-command:
+        description: Override default install command
+        type: string
+        default: ""
+      seed-command:
+        description: Optional pre-test seed
+        type: string
+        default: ""
+      test-command:
+        type: string
+        required: true
+      database-image:
+        type: string
+        default: "postgres:15"
+      redis-image:
+        type: string
+        default: "redis:7-alpine"
+      database-name:
+        type: string
+        default: "test_db"
+      database-user:
+        type: string
+        default: "test_user"
+      timeout-minutes:
+        type: number
+        default: 30
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: integration
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+
+    services:
+      postgres:
+        image: ${{ inputs.database-image }}
+        env:
+          POSTGRES_DB: ${{ inputs.database-name }}
+          POSTGRES_USER: ${{ inputs.database-user }}
+          POSTGRES_PASSWORD: testpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ${{ inputs.database-user }}"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: ${{ inputs.redis-image }}
+        ports:
+          - 6379:6379
+
+    env:
+      DATABASE_URL: "postgresql://${{ inputs.database-user }}:testpassword@localhost:5432/${{ inputs.database-name }}"
+      REDIS_URL: "redis://localhost:6379"
+
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - name: Set up Python
+        if: ${{ inputs.runtime == 'python' }}
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
+        with:
+          python-version: ${{ inputs.runtime-version }}
+
+      - name: Set up Node
+        if: ${{ inputs.runtime == 'node' }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: ${{ inputs.runtime-version }}
+          cache: 'npm'
+
+      - name: Install
+        run: |
+          set -e
+          if [ -n "${{ inputs.install-command }}" ]; then
+            ${{ inputs.install-command }}
+          elif [ "${{ inputs.runtime }}" = "python" ]; then
+            python -m pip install --upgrade pip
+            [ -f requirements.txt ] && pip install -r requirements.txt
+            pip install pytest pytest-asyncio
+          else
+            npm ci
+          fi
+
+      - name: Seed
+        if: ${{ inputs.seed-command != '' }}
+        run: ${{ inputs.seed-command }}
+
+      - name: Run integration tests
+        run: ${{ inputs.test-command }}
+
+      - uses: lmcoelho/.github/actions/step-summary@v1
+        with:
+          job-name: test-integration

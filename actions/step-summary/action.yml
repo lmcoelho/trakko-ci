@@ -1,0 +1,62 @@
+name: Step summary
+description: >
+  Emit a uniform pipeline-summary block to $GITHUB_STEP_SUMMARY with trigger,
+  ref, commit, runner OS, and an estimated billable-minute cost (Linux=1×,
+  Windows=2×, macOS=10×). Safe to call multiple times in a job — each call
+  appends.
+
+inputs:
+  workflow:
+    description: Workflow display name
+    required: false
+    default: ${{ github.workflow }}
+  job-name:
+    description: Logical job name for the summary line
+    required: false
+    default: ""
+  details:
+    description: Free-form details (markdown allowed)
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        WF: ${{ inputs.workflow }}
+        JOB: ${{ inputs.job-name }}
+        DETAILS: ${{ inputs.details }}
+        TRIGGER: ${{ github.event_name }}
+        REF: ${{ github.ref }}
+        SHA: ${{ github.sha }}
+        REPO: ${{ github.repository }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        RUNNER_OS: ${{ runner.os }}
+      run: |
+        SHORT="${SHA:0:7}"
+        case "$RUNNER_OS" in
+          Linux)   MULT=1 ;;
+          Windows) MULT=2 ;;
+          macOS)   MULT=10 ;;
+          *)       MULT=1 ;;
+        esac
+        {
+          echo "## Pipeline summary"
+          echo
+          echo "| Field | Value |"
+          echo "| --- | --- |"
+          echo "| Workflow | $WF |"
+          if [ -n "$JOB" ]; then echo "| Job | $JOB |"; fi
+          echo "| Trigger | $TRIGGER |"
+          echo "| Ref | $REF |"
+          echo "| Commit | \`$SHORT\` |"
+          echo "| Runner | $RUNNER_OS (×$MULT billable) |"
+          echo "| Run | $RUN_URL |"
+          if [ -n "$DETAILS" ]; then
+            echo
+            echo "### Details"
+            echo
+            echo "$DETAILS"
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"

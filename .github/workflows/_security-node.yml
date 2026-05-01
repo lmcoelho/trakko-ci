@@ -1,0 +1,110 @@
+name: _security-node (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        type: string
+        required: true
+      working-directory:
+        type: string
+        default: "."
+      run-gitleaks:
+        type: boolean
+        default: true
+      run-npm-audit:
+        type: boolean
+        default: true
+      npm-audit-level:
+        description: low | moderate | high | critical
+        type: string
+        default: "high"
+      accepted-vulns:
+        description: Comma-separated package names whose CVEs are accepted (informational; npm audit doesn't have a native allowlist)
+        type: string
+        default: ""
+      run-hardcoded-secret-scan:
+        description: Run an extra grep-based scan for AIza/sk- patterns (vigilos hardening)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    if: ${{ inputs.run-gitleaks }}
+    name: gitleaks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - uses: lmcoelho/.github/actions/gitleaks-scan@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  npm-audit:
+    if: ${{ inputs.run-npm-audit }}
+    name: npm-audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: 'npm'
+      - name: Install
+        run: npm ci
+      - name: Audit
+        env:
+          ACCEPTED: ${{ inputs.accepted-vulns }}
+        run: |
+          set -e
+          # Soft pass to inspect; allowlist applied via JSON inspection below.
+          npm audit --audit-level=${{ inputs.npm-audit-level }} || \
+            echo "::warning::npm audit found vulnerabilities — checking against accepted allowlist"
+          if [ -z "$ACCEPTED" ]; then exit 0; fi
+          NEW_VULNS=$(npm audit --json 2>/dev/null | python3 - "$ACCEPTED" <<'PY'
+          import json, sys
+          accepted = set(p.strip() for p in sys.argv[1].split(',') if p.strip())
+          data = json.load(sys.stdin)
+          vulns = data.get('vulnerabilities', {})
+          new = [k for k, v in vulns.items()
+                 if v.get('severity') in ('critical', 'high') and k not in accepted]
+          print('\n'.join(new))
+          PY
+          )
+          if [ -n "$NEW_VULNS" ]; then
+            echo "::error::New critical/high vulnerabilities outside the accepted allowlist:"
+            echo "$NEW_VULNS"
+            exit 1
+          fi
+          echo "Only accepted known vulnerabilities present. Proceeding."
+
+  hardcoded-secret:
+    if: ${{ inputs.run-hardcoded-secret-scan }}
+    name: hardcoded-secret-scan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      - name: Scan
+        run: |
+          if grep -rn \
+            --include="*.ts" --include="*.js" --include="*.json" \
+            --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git \
+            --exclude-dir=public \
+            --exclude="*.test.ts" --exclude="*.spec.ts" \
+            -E '(AIza[0-9A-Za-z\-_]{35}|sk-[a-zA-Z0-9]{48}|sk_[a-zA-Z0-9]{48}|"password"\s*:\s*"[^"]{8,}")' \
+            . ; then
+            echo "::error::potential hardcoded secret found"
+            exit 1
+          fi
+          echo "PASS: no hardcoded secrets detected"

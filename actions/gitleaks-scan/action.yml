@@ -1,0 +1,28 @@
+name: Gitleaks scan
+description: >
+  Run gitleaks against the repo. Sets FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 so
+  the action keeps working through the Node 20 → Node 24 transition.
+
+inputs:
+  github-token:
+    description: GitHub token for posting PR scan summary
+    required: true
+  enable-comments:
+    description: Allow gitleaks-action to post a PR comment
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout (full history for gitleaks)
+      uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      with:
+        fetch-depth: 0
+
+    - name: Run gitleaks
+      uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2.3.9
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+        GITLEAKS_ENABLE_COMMENTS: ${{ inputs.enable-comments }}

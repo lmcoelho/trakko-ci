@@ -1,0 +1,96 @@
+name: _validate-iac (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      yaml-paths:
+        description: Space-separated paths to lint with yamllint and validate with kubeconform
+        type: string
+        default: "k8s/"
+      yamllint-config:
+        description: Inline yamllint config string
+        type: string
+        default: '{extends: relaxed, rules: {line-length: {max: 200}}}'
+      kubeconform-args:
+        description: "Extra args to kubeconform (default: -summary -ignore-missing-schemas)"
+        type: string
+        default: "-summary -ignore-missing-schemas"
+      include-workflows:
+        description: Also yamllint .github/workflows/
+        type: boolean
+        default: true
+      gitleaks-permissions:
+        description: 'gitleaks PR-comment perms: "read" or "write"'
+        type: string
+        default: "read"
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: ${{ inputs.gitleaks-permissions == 'write' && 'write' || 'read' }}
+      issues: read
+    steps:
+      - uses: lmcoelho/.github/actions/gitleaks-scan@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  yamllint:
+    name: yamllint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      - name: Install yamllint
+        run: pip install --quiet yamllint
+      - name: Lint
+        env:
+          YL_CFG: ${{ inputs.yamllint-config }}
+          YL_PATHS: ${{ inputs.yaml-paths }}
+          INCLUDE_WF: ${{ inputs.include-workflows }}
+        run: |
+          set -e
+          paths="$YL_PATHS"
+          if [ "$INCLUDE_WF" = "true" ] && [ -d .github/workflows ]; then
+            paths="$paths .github/workflows/"
+          fi
+          # shellcheck disable=SC2086
+          yamllint -d "$YL_CFG" $paths
+
+  kubeconform:
+    name: kubeconform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      - name: Install kubeconform
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | sudo tar xz -C /usr/local/bin
+      - name: Validate manifests
+        env:
+          PATHS: ${{ inputs.yaml-paths }}
+          ARGS: ${{ inputs.kubeconform-args }}
+        run: |
+          set -e
+          # shellcheck disable=SC2086
+          find $PATHS -name '*.yaml' ! -name '*template*' -exec \
+            kubeconform $ARGS {} +
+
+  summary:
+    name: summary
+    needs: [gitleaks, yamllint, kubeconform]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      - uses: lmcoelho/.github/actions/step-summary@v1
+        with:
+          job-name: validate-iac
+          details: |
+            - gitleaks: ${{ needs.gitleaks.result }}
+            - yamllint: ${{ needs.yamllint.result }}
+            - kubeconform: ${{ needs.kubeconform.result }}

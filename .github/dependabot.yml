@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # Keep our own composite-action SHAs current
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore(deps)
+  - package-ecosystem: github-actions
+    directory: /actions/tailscale-ssh-bootstrap
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(deps)
+  - package-ecosystem: github-actions
+    directory: /actions/gitleaks-scan
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(deps)

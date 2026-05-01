@@ -1,0 +1,69 @@
+name: Tailscale + SSH bootstrap
+description: >
+  Connect the runner to the trakko tailnet, install a deploy SSH key, and
+  ssh-keyscan the target host with retry. Pattern extracted from
+  vigilos/deploy.yml (post INC-2026-04-20). Always cleans up the deploy key.
+
+inputs:
+  oauth-client-id:
+    description: Tailscale OAuth client ID (tag:ci device)
+    required: true
+  oauth-secret:
+    description: Tailscale OAuth client secret
+    required: true
+  ssh-key:
+    description: Private SSH key authorised on the deploy host
+    required: true
+  deploy-host:
+    description: Hostname or Tailscale IP of the deploy target
+    required: true
+  tags:
+    description: Tailscale ACL tags
+    required: false
+    default: tag:ci
+  keyscan-attempts:
+    description: ssh-keyscan retry count
+    required: false
+    default: "5"
+  keyscan-timeout:
+    description: ssh-keyscan per-attempt timeout in seconds
+    required: false
+    default: "10"
+
+runs:
+  using: composite
+  steps:
+    - name: Connect to Tailscale
+      uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8  # v4
+      with:
+        oauth-client-id: ${{ inputs.oauth-client-id }}
+        oauth-secret: ${{ inputs.oauth-secret }}
+        tags: ${{ inputs.tags }}
+
+    - name: Install deploy key
+      shell: bash
+      run: |
+        mkdir -p ~/.ssh
+        printf '%s\n' "${{ inputs.ssh-key }}" > ~/.ssh/deploy_key
+        chmod 600 ~/.ssh/deploy_key
+
+    - name: ssh-keyscan with retry
+      shell: bash
+      env:
+        DEPLOY_HOST: ${{ inputs.deploy-host }}
+        ATTEMPTS: ${{ inputs.keyscan-attempts }}
+        TIMEOUT: ${{ inputs.keyscan-timeout }}
+      run: |
+        set -e
+        for attempt in $(seq 1 "$ATTEMPTS"); do
+          if ssh-keyscan -T "$TIMEOUT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/tmp/keyscan.err; then
+            if [ -s ~/.ssh/known_hosts ]; then
+              echo "ssh-keyscan succeeded on attempt $attempt"
+              exit 0
+            fi
+          fi
+          echo "ssh-keyscan attempt $attempt produced no host key (stderr: $(cat /tmp/keyscan.err 2>/dev/null || true))"
+          sleep 5
+        done
+        echo "::error title=SSH host-key scan failed::ssh-keyscan could not reach $DEPLOY_HOST after $ATTEMPTS attempts."
+        exit 1

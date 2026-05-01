@@ -1,0 +1,121 @@
+name: _security-image (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: Full image ref (ghcr.io/owner/name:tag) to scan
+        type: string
+        required: true
+      run-trivy-os:
+        type: boolean
+        default: true
+      trivy-os-blocking:
+        type: boolean
+        default: false
+      run-trivy-libs:
+        type: boolean
+        default: true
+      trivy-libs-blocking:
+        type: boolean
+        default: true
+      run-syft-sbom:
+        type: boolean
+        default: true
+      run-grype:
+        type: boolean
+        default: true
+      grype-severity-cutoff:
+        type: string
+        default: "high"
+      grype-only-fixed:
+        type: boolean
+        default: true
+      sbom-retention-days:
+        type: number
+        default: 90
+
+permissions:
+  contents: read
+  packages: read
+  security-events: write
+
+jobs:
+  trivy-os:
+    if: ${{ inputs.run-trivy-os }}
+    name: trivy-os
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Trivy (OS packages)
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          image-ref: ${{ inputs.image }}
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          vuln-type: 'os'
+          exit-code: ${{ inputs.trivy-os-blocking && '1' || '0' }}
+
+  trivy-libs:
+    if: ${{ inputs.run-trivy-libs }}
+    name: trivy-libs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Trivy (libraries)
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          image-ref: ${{ inputs.image }}
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          vuln-type: 'library'
+          exit-code: ${{ inputs.trivy-libs-blocking && '1' || '0' }}
+
+  sbom-grype:
+    name: sbom + grype
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate SBOM (Syft)
+        if: ${{ inputs.run-syft-sbom }}
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
+        with:
+          image: ${{ inputs.image }}
+          artifact-name: sbom-cyclonedx.json
+          output-file: sbom-cyclonedx.json
+          format: cyclonedx-json
+
+      - name: Scan SBOM (Grype)
+        if: ${{ inputs.run-syft-sbom && inputs.run-grype }}
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2  # v7
+        with:
+          sbom: sbom-cyclonedx.json
+          severity-cutoff: ${{ inputs.grype-severity-cutoff }}
+          fail-build: true
+          output-format: table
+          only-fixed: ${{ inputs.grype-only-fixed }}
+
+      - name: Upload SBOM
+        if: ${{ inputs.run-syft-sbom }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+        with:
+          name: sbom
+          path: sbom-cyclonedx.json
+          retention-days: ${{ inputs.sbom-retention-days }}
+          if-no-files-found: ignore

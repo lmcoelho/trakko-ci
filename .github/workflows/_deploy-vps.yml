@@ -1,0 +1,207 @@
+name: _deploy-vps (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: GitHub environment (staging | production)
+        type: string
+        required: true
+      namespace:
+        description: K8s namespace on the cluster
+        type: string
+        required: true
+      image:
+        description: Full image ref including the SHA tag (ghcr.io/owner/img:sha-abc1234)
+        type: string
+        required: true
+      deployments:
+        description: 'Comma-separated "deploy/<name>:<container>" set-image targets'
+        type: string
+        default: ""
+      cronjobs:
+        description: Comma-separated CronJob names to patch with the new image
+        type: string
+        default: ""
+      apply-manifests-dir:
+        description: Optional directory of non-image-bearing manifests to kubectl apply (relative to repo root)
+        type: string
+        default: ""
+      verify-command:
+        description: Remote shell command run after rollout to verify health
+        type: string
+        default: ""
+      rollback-on-failure:
+        description: Run kubectl rollout undo on every named deployment if any prior step failed
+        type: boolean
+        default: true
+      rollout-timeout:
+        description: Timeout passed to kubectl rollout status (e.g. "300s")
+        type: string
+        default: "300s"
+      timeout-minutes:
+        type: number
+        default: 15
+    secrets:
+      TS_OAUTH_CLIENT_ID:
+        required: true
+      TS_OAUTH_SECRET:
+        required: true
+      DEPLOY_HOST:
+        required: true
+      DEPLOY_SSH_KEY:
+        required: true
+      DEPLOY_USER:
+        required: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    name: deploy (${{ inputs.environment }}/${{ inputs.namespace }})
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}-${{ inputs.namespace }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - name: Tailscale + SSH bootstrap
+        uses: lmcoelho/.github/actions/tailscale-ssh-bootstrap@v1
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          deploy-host: ${{ secrets.DEPLOY_HOST }}
+
+      - name: Validate image tag format
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: |
+          # Allow ghcr.io/<owner>/<name>:sha-<7hex> only (defends against shell injection
+          # in the SSH heredocs below; pattern from money-maker/deploy.yml line 254).
+          if ! echo "$IMAGE" | grep -qE '^ghcr\.io/[a-z0-9._/-]+:sha-[0-9a-f]{7,}$'; then
+            echo "::error::IMAGE '$IMAGE' does not match ghcr.io/.../sha-<hex> format"
+            exit 1
+          fi
+
+      - name: Apply non-image-bearing manifests (if any)
+        if: ${{ inputs.apply-manifests-dir != '' }}
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'claude' }}
+          MDIR: ${{ inputs.apply-manifests-dir }}
+          NS: ${{ inputs.namespace }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=accept-new -i ~/.ssh/deploy_key"
+          # Stage manifests on the VPS
+          ssh $SSH_OPTS "${DEPLOY_USER}@${DEPLOY_HOST}" "rm -rf /tmp/v2-deploy-manifests && mkdir -p /tmp/v2-deploy-manifests"
+          # Avoid Deployments and CronJobs (image refs are managed via set-image / patch below)
+          # and any *.template.yaml placeholders.
+          find "$MDIR" -maxdepth 2 -name '*.yaml' \
+            ! -name '*template*' \
+            ! -name 'deployment*.yaml' \
+            ! -name '*deployment.yaml' \
+            ! -name '*cronjob*.yaml' \
+            -print0 | xargs -0 -I {} scp $SSH_OPTS "{}" "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/v2-deploy-manifests/"
+          ssh $SSH_OPTS "${DEPLOY_USER}@${DEPLOY_HOST}" "
+            set -euo pipefail
+            if compgen -G '/tmp/v2-deploy-manifests/*.yaml' > /dev/null; then
+              sudo kubectl apply -n '${NS}' -f /tmp/v2-deploy-manifests/
+            else
+              echo 'no infra manifests staged — skipping apply'
+            fi
+            rm -rf /tmp/v2-deploy-manifests
+          "
+
+      - name: Roll Deployments to new image
+        if: ${{ inputs.deployments != '' }}
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'claude' }}
+          IMAGE: ${{ inputs.image }}
+          NS: ${{ inputs.namespace }}
+          DEPLOYMENTS: ${{ inputs.deployments }}
+          ROLLOUT_TIMEOUT: ${{ inputs.rollout-timeout }}
+        run: |
+          set -euo pipefail
+          SSH="ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/deploy_key ${DEPLOY_USER}@${DEPLOY_HOST}"
+          IFS=',' read -r -a items <<< "$DEPLOYMENTS"
+          for item in "${items[@]}"; do
+            depl="${item%%:*}"
+            ctn="${item##*:}"
+            echo "→ kubectl set image -n $NS deployment/$depl $ctn=$IMAGE"
+            $SSH "sudo kubectl -n '$NS' set image deployment/'$depl' '$ctn'='$IMAGE'"
+          done
+          for item in "${items[@]}"; do
+            depl="${item%%:*}"
+            $SSH "sudo kubectl -n '$NS' rollout status deployment/'$depl' --timeout=${ROLLOUT_TIMEOUT}"
+          done
+
+      - name: Patch CronJobs to new image
+        if: ${{ inputs.cronjobs != '' }}
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'claude' }}
+          IMAGE: ${{ inputs.image }}
+          NS: ${{ inputs.namespace }}
+          CJS: ${{ inputs.cronjobs }}
+        run: |
+          set -euo pipefail
+          SSH="ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/deploy_key ${DEPLOY_USER}@${DEPLOY_HOST}"
+          IFS=',' read -r -a items <<< "$CJS"
+          for cj in "${items[@]}"; do
+            $SSH "sudo kubectl -n '$NS' patch cronjob '$cj' --type=json \
+              -p='[{\"op\":\"replace\",\"path\":\"/spec/jobTemplate/spec/template/spec/containers/0/image\",\"value\":\"$IMAGE\"}]'"
+          done
+
+      - name: Verify
+        if: ${{ inputs.verify-command != '' }}
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'claude' }}
+          VERIFY: ${{ inputs.verify-command }}
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/deploy_key \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" "$VERIFY"
+
+      - name: Rollback on failure
+        if: ${{ failure() && inputs.rollback-on-failure && inputs.deployments != '' }}
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'claude' }}
+          NS: ${{ inputs.namespace }}
+          DEPLOYMENTS: ${{ inputs.deployments }}
+          ROLLOUT_TIMEOUT: ${{ inputs.rollout-timeout }}
+        run: |
+          set +e
+          SSH="ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/deploy_key ${DEPLOY_USER}@${DEPLOY_HOST}"
+          IFS=',' read -r -a items <<< "$DEPLOYMENTS"
+          for item in "${items[@]}"; do
+            depl="${item%%:*}"
+            echo "→ rollout undo deployment/$depl"
+            $SSH "sudo kubectl -n '$NS' rollout undo deployment/'$depl'"
+            $SSH "sudo kubectl -n '$NS' rollout status deployment/'$depl' --timeout=${ROLLOUT_TIMEOUT}"
+          done
+
+      - uses: lmcoelho/.github/actions/step-summary@v1
+        if: always()
+        with:
+          job-name: deploy-vps
+          details: |
+            - Environment: ${{ inputs.environment }}
+            - Namespace: ${{ inputs.namespace }}
+            - Image: `${{ inputs.image }}`
+            - Deployments: ${{ inputs.deployments }}
+            - CronJobs: ${{ inputs.cronjobs }}
+            - Result: ${{ job.status }}
+
+      - name: Cleanup
+        if: always()
+        run: |
+          shred -vfz -n 3 ~/.ssh/deploy_key 2>/dev/null || rm -f ~/.ssh/deploy_key

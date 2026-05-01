@@ -1,0 +1,93 @@
+name: _test-python (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: Python version (string, e.g. "3.13")
+        type: string
+        required: true
+      working-directory:
+        description: Directory to run commands in
+        type: string
+        default: "."
+      requirements-file:
+        description: pip requirements file (relative to working-directory)
+        type: string
+        default: "requirements.txt"
+      test-command:
+        description: Command to run the test suite
+        type: string
+        default: "pytest tests/ -q --tb=short"
+      coverage-fail-under:
+        description: Minimum coverage % to pass; 0 disables the gate
+        type: number
+        default: 0
+      coverage-paths:
+        description: --cov= paths (space-separated)
+        type: string
+        default: "src"
+      lint-command:
+        description: Lint command to run before tests; empty disables
+        type: string
+        default: ""
+      timeout-minutes:
+        description: Job timeout
+        type: number
+        default: 15
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (python ${{ inputs.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - name: Set up Python ${{ inputs.python-version }}
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "${{ inputs.requirements-file }}" ]; then
+            pip install -r "${{ inputs.requirements-file }}"
+          fi
+          # Test deps that callers don't always pin
+          pip install pytest pytest-cov
+
+      - name: Lint
+        if: ${{ inputs.lint-command != '' }}
+        run: ${{ inputs.lint-command }}
+
+      - name: Run tests
+        env:
+          COV_PATHS: ${{ inputs.coverage-paths }}
+          COV_GATE: ${{ inputs.coverage-fail-under }}
+        run: |
+          set -e
+          cov_args=""
+          if [ -n "$COV_PATHS" ]; then
+            for p in $COV_PATHS; do cov_args="$cov_args --cov=$p"; done
+            cov_args="$cov_args --cov-report=term-missing"
+            if [ "$COV_GATE" != "0" ]; then
+              cov_args="$cov_args --cov-fail-under=$COV_GATE"
+            fi
+          fi
+          # shellcheck disable=SC2086
+          ${{ inputs.test-command }} $cov_args
+
+      - uses: lmcoelho/.github/actions/step-summary@v1
+        with:
+          job-name: test-python
+          details: |
+            - Python: ${{ inputs.python-version }}
+            - Coverage gate: ${{ inputs.coverage-fail-under }}%

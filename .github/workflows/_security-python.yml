@@ -1,0 +1,117 @@
+name: _security-python (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        type: string
+        required: true
+      working-directory:
+        type: string
+        default: "."
+      requirements-file:
+        type: string
+        default: "requirements.txt"
+      run-gitleaks:
+        type: boolean
+        default: true
+      run-pip-audit:
+        type: boolean
+        default: true
+      pip-audit-strict:
+        type: boolean
+        default: true
+      run-bandit:
+        type: boolean
+        default: true
+      bandit-paths:
+        description: Space-separated paths to scan with bandit
+        type: string
+        default: "src"
+      bandit-severity:
+        description: low | medium | high
+        type: string
+        default: "high"
+      run-cyclonedx:
+        type: boolean
+        default: false
+      sbom-output-path:
+        type: string
+        default: "docs/sbom-latest.json"
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    if: ${{ inputs.run-gitleaks }}
+    name: gitleaks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - uses: lmcoelho/.github/actions/gitleaks-scan@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  python-deps:
+    name: python-deps
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - name: Set up Python ${{ inputs.python-version }}
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install requirements
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "${{ inputs.requirements-file }}" ]; then
+            pip install -r "${{ inputs.requirements-file }}"
+          fi
+
+      - name: pip-audit
+        if: ${{ inputs.run-pip-audit }}
+        run: |
+          pip install pip-audit
+          if [ "${{ inputs.pip-audit-strict }}" = "true" ]; then
+            pip-audit --strict --desc -r "${{ inputs.requirements-file }}"
+          else
+            pip-audit --desc -r "${{ inputs.requirements-file }}"
+          fi
+
+      - name: bandit
+        if: ${{ inputs.run-bandit }}
+        run: |
+          pip install bandit
+          # shellcheck disable=SC2086
+          bandit -r ${{ inputs.bandit-paths }} \
+            --severity-level ${{ inputs.bandit-severity }} -q -x tests/
+
+      - name: Generate SBOM (cyclonedx)
+        if: ${{ inputs.run-cyclonedx }}
+        run: |
+          pip install cyclonedx-bom
+          mkdir -p "$(dirname '${{ inputs.sbom-output-path }}')"
+          cyclonedx-py requirements "${{ inputs.requirements-file }}" \
+            -o "${{ inputs.sbom-output-path }}" --spec-version 1.5
+        continue-on-error: true
+
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+        if: ${{ inputs.run-cyclonedx }}
+        with:
+          name: sbom-cyclonedx
+          path: ${{ inputs.working-directory }}/${{ inputs.sbom-output-path }}
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - uses: lmcoelho/.github/actions/step-summary@v1
+        with:
+          job-name: security-python
