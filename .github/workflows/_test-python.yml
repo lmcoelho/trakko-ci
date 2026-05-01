@@ -62,7 +62,7 @@ jobs:
             pip install -r "${{ inputs.requirements-file }}"
           fi
           # Test deps that callers don't always pin
-          pip install pytest pytest-cov
+          pip install pytest pytest-cov pytest-asyncio pytest-timeout
 
       - name: Lint
         if: ${{ inputs.lint-command != '' }}
