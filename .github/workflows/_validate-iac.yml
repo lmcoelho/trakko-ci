@@ -19,10 +19,6 @@ on:
         description: Also yamllint .github/workflows/
         type: boolean
         default: true
-      gitleaks-permissions:
-        description: 'gitleaks PR-comment perms: "read" or "write"'
-        type: string
-        default: "read"
 
 permissions:
   contents: read
@@ -33,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: ${{ inputs.gitleaks-permissions == 'write' && 'write' || 'read' }}
+      pull-requests: write
       issues: read
     steps:
       - uses: lmcoelho/.github/actions/gitleaks-scan@v1
