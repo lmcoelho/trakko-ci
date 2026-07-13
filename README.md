@@ -46,3 +46,5 @@ common library.
 ## License
 
 Internal use. Not currently licensed for redistribution outside lmcoelho.
+
+<!-- Verified: Linear GitHub integration end-to-end test (TRA-83), 2026-07-13 -->
