@@ -31,6 +31,13 @@ on:
       grype-only-fixed:
         type: boolean
         default: true
+      grype-ignore-cves:
+        description: >-
+          Space/comma-separated CVE/GHSA IDs for grype to ignore — e.g. base-image
+          interpreter CVEs with no fixed release. Written to a .grype.yaml the scan
+          reads. Default "" keeps current behavior (no ignores).
+        type: string
+        default: ""
       sbom-retention-days:
         type: number
         default: 90
@@ -100,6 +107,23 @@ jobs:
           artifact-name: sbom-cyclonedx.json
           output-file: sbom-cyclonedx.json
           format: cyclonedx-json
+
+      # Write a grype ignore-list (.grype.yaml, read from CWD by the scan below)
+      # ONLY when grype-ignore-cves is set. Keeps base-image CVEs with no fixed
+      # release from blocking deploys — the grype analogue of trivy-os-blocking.
+      - name: Grype ignore-list
+        if: ${{ inputs.run-syft-sbom && inputs.run-grype && inputs.grype-ignore-cves != '' }}
+        run: |
+          {
+            echo "ignore:"
+            for id in $(echo "${{ inputs.grype-ignore-cves }}" | tr ',' ' '); do
+              case "$id" in
+                CVE-*|GHSA-*) echo "  - vulnerability: ${id}" ;;
+                *) echo "::warning::ignoring malformed grype-ignore id '${id}'" >&2 ;;
+              esac
+            done
+          } > .grype.yaml
+          echo "wrote .grype.yaml:"; cat .grype.yaml
 
       - name: Scan SBOM (Grype)
         if: ${{ inputs.run-syft-sbom && inputs.run-grype }}
