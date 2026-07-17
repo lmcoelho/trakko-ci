@@ -1,0 +1,63 @@
+name: assert-deployed
+description: >-
+  Fail the run (and optionally page Telegram) when a deploy job did NOT
+  succeed — catches a silently-skipped deploy (e.g. scan-gated) that would
+  otherwise leave the run green while production stays stale. Born from OPS-013,
+  where atlas sat un-deployed for ~2.5 months behind a green pipeline.
+
+inputs:
+  deploy-result:
+    description: Result of the deploy job, i.e. ${{ needs.<deploy-job>.result }}.
+    required: true
+  scan-result:
+    description: Optional scan job result, for context in the alert.
+    required: false
+    default: ""
+  service-name:
+    description: Human name shown in the alert (defaults to the repo).
+    required: false
+    default: ${{ github.repository }}
+  telegram-bot-token:
+    description: Optional. If set with chat-id, pages Telegram on failure. Omit for red-run-only.
+    required: false
+    default: ""
+  telegram-chat-id:
+    description: Optional Telegram chat id.
+    required: false
+    default: ""
+  telegram-thread-id:
+    description: Optional Telegram forum topic (message_thread_id).
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: assert deploy succeeded
+      shell: bash
+      env:
+        DEPLOY_RESULT: ${{ inputs.deploy-result }}
+        SCAN_RESULT: ${{ inputs.scan-result }}
+        SERVICE: ${{ inputs.service-name }}
+        BOT_TOKEN: ${{ inputs.telegram-bot-token }}
+        CHAT_ID: ${{ inputs.telegram-chat-id }}
+        THREAD_ID: ${{ inputs.telegram-thread-id }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        echo "deploy=${DEPLOY_RESULT} scan=${SCAN_RESULT}"
+        if [ "${DEPLOY_RESULT}" = "success" ]; then
+          echo "deploy ran — OK"; exit 0
+        fi
+        echo "::error::${SERVICE} deploy did NOT run (deploy=${DEPLOY_RESULT}, scan=${SCAN_RESULT}) — main built but NOT deployed; production is stale."
+        if [ -n "${BOT_TOKEN}" ] && [ -n "${CHAT_ID}" ]; then
+          curl -sS --max-time 12 "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            ${THREAD_ID:+--data-urlencode "message_thread_id=${THREAD_ID}"} \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "disable_web_page_preview=true" \
+            --data-urlencode "text=🚨 <b>${SERVICE} deploy BLOCKED</b> — main built but NOT deployed (scan=${SCAN_RESULT}, deploy=${DEPLOY_RESULT}). Production is stale. <a href=\"${RUN_URL}\">run log</a>" \
+            >/dev/null && echo "paged Telegram" || echo "(telegram send failed)"
+        else
+          echo "(no telegram creds — the red run is the signal)"
+        fi
+        exit 1
