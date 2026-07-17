@@ -1,16 +1,30 @@
 name: Gitleaks scan
 description: >
-  Run gitleaks against the repo. Sets FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 so
-  the action keeps working through the Node 20 → Node 24 transition.
+  Deterministic full-history secret scan. Downloads a pinned gitleaks binary
+  and runs `gitleaks detect` over the full checkout — exits 0 on clean, 1 on a
+  real finding, honoring .gitleaksignore.
+
+  Replaces gitleaks/gitleaks-action (v3), which intermittently computed an
+  EMPTY push-event range ("scanned ~0 bytes") and exited non-zero on clean,
+  silently SKIPPING any deploy job that `needs` it (the OPS-013 silent-skip
+  pattern; blocked gambrikk PRs #173/#183). gambrikk proved the direct-scan
+  fix in-repo; this is the backport (TRA-191).
 
 inputs:
+  # Kept for caller compatibility (previously required by gitleaks-action).
+  # The direct scan needs no token and posts no PR comment — both are unused.
   github-token:
-    description: GitHub token for posting PR scan summary
-    required: true
+    description: Deprecated / unused. Kept so existing callers don't break.
+    required: false
+    default: ""
   enable-comments:
-    description: Allow gitleaks-action to post a PR comment
+    description: Deprecated / unused (direct scan posts no PR comment).
     required: false
     default: "true"
+  gitleaks-version:
+    description: gitleaks release to pin.
+    required: false
+    default: "8.30.1"
 
 runs:
   using: composite
@@ -20,9 +34,12 @@ runs:
       with:
         fetch-depth: 0
 
-    - name: Run gitleaks
-      uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e  # v3.0.0
+    - name: Run gitleaks (direct, deterministic full-tree scan)
+      shell: bash
       env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
-        FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-        GITLEAKS_ENABLE_COMMENTS: ${{ inputs.enable-comments }}
+        VER: ${{ inputs.gitleaks-version }}
+      run: |
+        set -euo pipefail
+        curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" \
+          | tar -xz gitleaks
+        ./gitleaks detect --source . --redact --no-banner --exit-code 1
