@@ -7,7 +7,7 @@ description: >-
 
 inputs:
   deploy-result:
-    description: Result of the deploy job, i.e. ${{ needs.<deploy-job>.result }}.
+    description: Result of the deploy job (pass needs.<deploy-job>.result from the workflow).
     required: true
   scan-result:
     description: Optional scan job result, for context in the alert.
