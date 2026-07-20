@@ -24,7 +24,7 @@ jobs:
     name: prepare synthetic fixture
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Generate fixture
         run: |
           mkdir -p _smoke/fixture/k8s
@@ -72,7 +72,7 @@ jobs:
     name: smoke _validate-iac
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       # Lint a known-good fixture and the workflow files of this repo
       - name: yamllint workflow files
         run: |
@@ -83,7 +83,7 @@ jobs:
     name: smoke step-summary
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: ./actions/step-summary
         with:
           job-name: smoke-step-summary
@@ -99,7 +99,7 @@ jobs:
       issues: read
     steps:
       - name: Checkout (so the runner can resolve ./actions/...)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: ./actions/gitleaks-scan
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
